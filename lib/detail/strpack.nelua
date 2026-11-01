@@ -42,7 +42,6 @@ local function packint(sb: *stringbuilder, a: auto, size: usize, maxalign: usize
   local neg: boolean = i < 0
   local n: uint64 = (@uint64)(i)
   ## end
-  -- TODO: we could do overflow checks here (like Lua does)
   local pads: usize = packalignforward(sb.size, size, maxalign) - sb.size
   if not sb:writebyte(0, pads) then return false end
   local buff: span(byte) = sb:prepare(size)
@@ -165,6 +164,22 @@ local function packgetoptalign(fmt: string, pos: *usize): usize
   return align
 end
 
+-- Asserts integer `a` fits in `size` bytes, like Lua's `string.pack` overflow checks.
+local function packcheckint(a: auto, size: usize, issigned: boolean): void
+  if size >= #@int64 then return end -- no overflow possible
+  ## if a.type.is_integral then
+  local i: int64 = (@int64)(a)
+  ## else
+  local i: int64 = tointeger(a)
+  ## end
+  if issigned then
+    local lim: int64 = 1_i64 << (size * 8 - 1)
+    assert(-lim <= i and i < lim, 'integer overflow')
+  else
+    assert((@uint64)(i) < 1_u64 << (size * 8), 'unsigned overflow')
+  end
+end
+
 -- Packs an argument.
 local function packarg(a: auto, c: byte, sb: *stringbuilder, fmt: string, pos: *usize, maxalign: usize, islittle: boolean): boolean
   switch c
@@ -189,12 +204,15 @@ local function packarg(a: auto, c: byte, sb: *stringbuilder, fmt: string, pos: *
     ## end
     assert(n >= #@usize or s.size < 1_usize << (n * 8), 'length does not fit in given size')
     return packint(sb, s.size, n, maxalign, islittle) and sb:write(s)
-  case 'i'_b, 'I'_b then return packint(sb, a, packgetnumlimit(fmt, pos, #@cint), maxalign, islittle)
-  case 'b'_b, 'B'_b then return packnum(sb, a, @byte, maxalign, islittle)
-  case 'h'_b, 'H'_b then return packnum(sb, a, @cushort, maxalign, islittle)
-  case 'l'_b, 'L'_b then return packnum(sb, a, @culong, maxalign, islittle)
-  case 'j'_b, 'J'_b then return packnum(sb, a, @uinteger, maxalign, islittle)
-  case 't'_b, 'T'_b then return packnum(sb, a, @usize, maxalign, islittle)
+  case 'i'_b, 'I'_b then
+    local size: usize = packgetnumlimit(fmt, pos, #@cint)
+    packcheckint(a, size, c == 'i'_b)
+    return packint(sb, a, size, maxalign, islittle)
+  case 'b'_b, 'B'_b then packcheckint(a, #@byte, c == 'b'_b) return packnum(sb, a, @byte, maxalign, islittle)
+  case 'h'_b, 'H'_b then packcheckint(a, #@cushort, c == 'h'_b) return packnum(sb, a, @cushort, maxalign, islittle)
+  case 'l'_b, 'L'_b then packcheckint(a, #@culong, c == 'l'_b) return packnum(sb, a, @culong, maxalign, islittle)
+  case 'j'_b, 'J'_b then return packnum(sb, a, @uinteger, maxalign, islittle) -- 8 bytes, can't overflow
+  case 't'_b, 'T'_b then packcheckint(a, #@usize, false) return packnum(sb, a, @usize, maxalign, islittle)
   case 'f'_b then return packnum(sb, a, @float32, maxalign, islittle)
   case 'd'_b then return packnum(sb, a, @float64, maxalign, islittle)
   case 'n'_b then return packnum(sb, a, @number, maxalign, islittle)
