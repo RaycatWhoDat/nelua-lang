@@ -304,26 +304,19 @@ because of its reliance on C function `gmtime` and C function `localtime`.
 ]]
 function os.date(format: facultative(string), formattime: facultative(integer)): string
   -- TODO: handle '*t' format
-  -- TODO: check for invalid formats (Lua performs checks)
   ## if formattime.type.is_niltype then
   local t: ctime_t = time(nilptr)
   ## else
   local t: ctime_t = (@ctime_t)(formattime)
   assert(t == formattime, 'time out of bounds')
   ## end
-  local fmt: cstring, stm: *tm, tmr: tm
-  local buf: [256]cchar <noinit>
-  local utc: boolean
   ## if format.type.is_niltype then
-    fmt = "%c"
+  local fmt: string = '%c'
   ## else
-    if format.size > 0 and format.data[0] == '!'_b then -- UTC?
-      utc = true
-      fmt = &format.data[1]
-    else
-      fmt = &format.data[0]
-    end
+  local fmt: string = format
   ## end
+  local utc: boolean = fmt.size > 0 and fmt.data[0] == '!'_b
+  local stm: *tm, tmr: tm
   ## cinclude '@unistd.h'
   local function gmtime_r(timep: *ctime_t, result: *tm): *tm <cimport,cinclude'<time.h>'> end
   local function gmtime(timep: *ctime_t): *tm <cimport,cinclude'<time.h>'> end
@@ -344,8 +337,46 @@ function os.date(format: facultative(string), formattime: facultative(integer)):
     end
   ## cemit '#endif'
   assert(stm ~= nilptr, "date result cannot be represented in this installation")
-  local size: csize = strftime(&buf, #buf, fmt, stm)
-  return string{data=&buf[0],size=size}:copy()
+  -- Like Lua, copy literal chars and run `strftime` on one validated conversion at a time:
+  -- unknown conversions are UB in C (MSVC aborts), and the result has no fixed size limit.
+  ## if ccinfo.is_windows then
+  local opts1: string, opts2: string = 'aAbBcdHIjmMpSUwWxXyYzZ%', '#c#x#d#H#I#j#m#M#S#U#w#W#y#Y'
+  ## else
+  local opts1: string, opts2: string = 'aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%', 'EcECExEXEyEYOdOeOHOIOmOMOSOuOUOVOwOWOy'
+  ## end
+  local sb: stringbuilder
+  local buf: [256]cchar <noinit>
+  local conv: [4]cchar
+  local i: usize = utc and 1 or 0
+  while i < fmt.size do
+    local c: byte = fmt.data[i]
+    i = i + 1
+    if c ~= '%'_b then
+      assert(sb:writebyte(c), 'out of memory')
+    else
+      local n: usize = 0 -- conversion length after '%'
+      if i < fmt.size then
+        for j: usize=0,<opts1.size do
+          if opts1.data[j] == fmt.data[i] then n = 1 break end
+        end
+      end
+      if n == 0 and i + 1 < fmt.size then
+        for j: usize=0,<opts2.size,2 do
+          if opts2.data[j] == fmt.data[i] and opts2.data[j+1] == fmt.data[i+1] then n = 2 break end
+        end
+      end
+      if n == 0 then
+        error("invalid conversion specifier '%"..(@string){data=&fmt.data[i], size=fmt.size-i}.."'")
+      end
+      conv[0] = '%'_b
+      memory.copy(&conv[1], &fmt.data[i], n)
+      conv[n+1] = 0
+      i = i + n
+      local size: csize = strftime(&buf, #buf, &conv, stm)
+      assert(sb:write((@string){data=&buf[0], size=size}), 'out of memory')
+    end
+  end
+  return sb:promote()
 end
 
 --[[

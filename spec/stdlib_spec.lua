@@ -59,6 +59,9 @@ it("os", function()
     "field 'year' is out-of-bound")
   expect.run_error_c("require 'os' local t = os.time(os.timedesc{year=2020, month=1, day=1, sec=1<<40})",
     "field 'sec' is out-of-bound")
+  -- invalid strftime conversions are UB in C (abort on MSVC), must error like Lua
+  expect.run_error_c("require 'os' local d = os.date('%Q')", "invalid conversion specifier '%Q'")
+  expect.run_error_c("require 'os' local d = os.date('abc%')", "invalid conversion specifier '%'")
 end)
 it("stringbuilder", function()
   expect.run_c_from_file('tests/stringbuilder_test.nelua')

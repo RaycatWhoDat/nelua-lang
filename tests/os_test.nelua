@@ -33,6 +33,17 @@ do -- os.date
 
   date = os.date('')
   assert(date == '')
+
+  -- results longer than any fixed buffer must not be truncated
+  local longfmt: string = string.rep('x', 300)
+  date = os.date(longfmt)
+  assert(date == longfmt)
+  date:destroy()
+  longfmt:destroy()
+
+  date = os.date('%%|%Y', 0)
+  assert(date:find('^%%|[0-9]+$') > 0)
+  date:destroy()
 end
 
 do -- os.execute
