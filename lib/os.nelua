@@ -406,6 +406,10 @@ and the number returned by time can be used only as an argument to `os.date` and
 
 When called with a record `os.timedesc`, `os.time` also normalizes all the fields,
 so that they represent the same time as before the call but with values inside their valid ranges.
+
+When `isdst` is `false` (the default), whether daylight saving time is in effect
+is determined from the timezone rules, like Lua does when `isdst` is absent.
+Set it to `true` to force daylight saving time.
 ]]
 function os.time(desc: facultative(os.timedesc)): integer
   local function mktime(tp: *tm): ctime_t <cimport,cinclude'<time.h>'> end
@@ -415,20 +419,27 @@ function os.time(desc: facultative(os.timedesc)): integer
   ## else
     --TODO: change desc to table and update fields with normalize values
     --TODO: make default hour 12
-    local ts: tm
-    ts.tm_year = desc.year - 1900
-    ts.tm_mon = desc.month - 1
-    ts.tm_mday = desc.day
-    ts.tm_hour = desc.hour
-    ts.tm_min = desc.min
-    ts.tm_sec = desc.sec
-    if desc.isdst then
-      ts.tm_isdst = 1
+    -- range check fields before narrowing to C `int`, like Lua does
+    local function tmfield(v: integer, delta: integer, errmsg: string): cint
+      assert(v >= 0 and v - delta <= #[primtypes.cint.max]# or
+             v < 0 and #[primtypes.cint.min]# + delta <= v, errmsg)
+      return (@cint)(v - delta)
     end
+    local ts: tm
+    ts.tm_year = tmfield(desc.year, 1900, "field 'year' is out-of-bound")
+    ts.tm_mon = tmfield(desc.month, 1, "field 'month' is out-of-bound")
+    ts.tm_mday = tmfield(desc.day, 0, "field 'day' is out-of-bound")
+    ts.tm_hour = tmfield(desc.hour, 0, "field 'hour' is out-of-bound")
+    ts.tm_min = tmfield(desc.min, 0, "field 'min' is out-of-bound")
+    ts.tm_sec = tmfield(desc.sec, 0, "field 'sec' is out-of-bound")
+    -- `isdst = false` can't be told apart from an absent field, so treat it as "unknown"
+    -- (-1, mktime decides from timezone rules), like Lua does when `isdst` is absent
+    ts.tm_isdst = desc.isdst and 1 or -1
     t = mktime(&ts)
   ## end
   local ret: integer = (@integer)(t)
-  assert(ret == t and t >= 0, 'time result cannot be represented in this installation')
+  -- -1 is mktime's error value, so it's rejected even though it's a valid time (like Lua)
+  assert(ret == t and t ~= -1, 'time result cannot be represented in this installation')
   return ret
 end
 

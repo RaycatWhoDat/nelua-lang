@@ -54,6 +54,11 @@ it("io", function()
 end)
 it("os", function()
   expect.run_c_from_file('tests/os_test.nelua')
+  -- fields that don't fit C's `int` must error (like Lua), not truncate
+  expect.run_error_c("require 'os' local t = os.time(os.timedesc{year=1<<40, month=1, day=1})",
+    "field 'year' is out-of-bound")
+  expect.run_error_c("require 'os' local t = os.time(os.timedesc{year=2020, month=1, day=1, sec=1<<40})",
+    "field 'sec' is out-of-bound")
 end)
 it("stringbuilder", function()
   expect.run_c_from_file('tests/stringbuilder_test.nelua')
