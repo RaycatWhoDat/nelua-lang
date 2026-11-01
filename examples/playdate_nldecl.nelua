@@ -1,0 +1,82 @@
+--[[
+Playdate "Hello World" using bindings generated from the Playdate C SDK.
+
+This is the SDK's C_API/Examples/Hello World ported to Nelua.
+The Playdate API is a struct of pointers to structs of function pointers,
+`pd->graphics->clear(...)` in C is simply `pd.graphics.clear(...)` in Nelua.
+
+Build for the simulator:
+  export PLAYDATE_SDK_PATH=/path/to/PlaydateSDK
+  cp -r "$PLAYDATE_SDK_PATH/C_API/Examples/Hello World" hello
+  nelua -o hello/src/main.c examples/playdate_nldecl.nelua
+  cmake -S hello -B hello/build && cmake --build hello/build
+  "$PLAYDATE_SDK_PATH/bin/PlaydateSimulator" hello/hello_world.pdx
+
+For the device, generate the C file with the ARM compiler so primitive sizes
+match the 32-bit target: `nelua --cc arm-none-eabi-gcc -o hello/src/main.c ...`
+]]
+
+##[==[
+local nldecl = require 'nelua.plugins.nldecl'
+local fs = require 'nelua.utils.fs'
+
+local sdkpath = os.getenv('PLAYDATE_SDK_PATH')
+static_assert(sdkpath, 'please set PLAYDATE_SDK_PATH environment variable')
+
+-- generate nelua bindings file if it does not exists yet.
+if not fs.isfile('playdate-bindings.nelua') then
+  nldecl.generate_bindings_file{
+    output_file = 'playdate-bindings.nelua',
+    parse_includes = {'"pd_api.h"'},
+    include_dirs = {sdkpath..'/C_API'},
+    parse_defines = {'TARGET_EXTENSION 1'},
+    include_names = {'^playdate_', '^PD', '^LCD', '^k', '^PlaydateAPI'},
+  }
+end
+
+cinclude '"pd_api.h"'
+pragmas.noentrypoint = true -- the Playdate OS calls `eventHandler`, there is no `main`
+pragmas.nogc = true -- nothing here allocates
+]==]
+
+require 'playdate-bindings'
+
+local TEXT_WIDTH <comptime> = 86
+local TEXT_HEIGHT <comptime> = 16
+local FONT_PATH <comptime> = '/System/Fonts/Asheville-Sans-14-Bold.pft'
+
+local font: *LCDFont
+local x, y = (LCD_COLUMNS - TEXT_WIDTH) // 2, (LCD_ROWS - TEXT_HEIGHT) // 2
+local dx, dy = 1, 2
+
+local function update(userdata: pointer): cint
+  local pd = (@*PlaydateAPI)(userdata)
+  local text = 'Hello World!'
+
+  pd.graphics.clear(kColorWhite)
+  pd.graphics.setFont(font)
+  pd.graphics.drawText(text.data, #text, kASCIIEncoding, x, y)
+
+  x = x + dx
+  y = y + dy
+  if x < 0 or x > LCD_COLUMNS - TEXT_WIDTH then dx = -dx end
+  if y < 0 or y > LCD_ROWS - TEXT_HEIGHT then dy = -dy end
+
+  pd.system.drawFPS(0, 0)
+  return 1
+end
+
+local function nelua_main(argc: cint, argv: *cstring): cint <cimport,nodecl> end
+
+local function eventHandler(pd: *PlaydateAPI, event: PDSystemEvent, arg: uint32): cint <cexport'eventHandler'>
+  if event == kEventInit then
+    nelua_main(0, nilptr) -- initialize top scope variables
+    local err: cstring
+    font = pd.graphics.loadFont(FONT_PATH, &err)
+    if not font then
+      pd.system.error("Couldn't load font %s: %s", FONT_PATH, err)
+    end
+    pd.system.setUpdateCallback(update, pd)
+  end
+  return 0
+end

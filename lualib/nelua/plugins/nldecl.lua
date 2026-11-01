@@ -1951,7 +1951,8 @@ function generate_bindings_visitors.CPointerType(context, node, emitter)
   elseif subcname == 'char' then
     emitter:add('cstring')
   else
-    if subtypenode.tag ~= 'CFuncType' then -- nelua function type is already a pointer
+    -- nelua function type is already a pointer (also when it's a typedef to a function type)
+    if context:get_canonical_node(subtypenode).tag ~= 'CFuncType' then
       emitter:add('*')
     end
     context:traverse_node(subtypenode, emitter)
