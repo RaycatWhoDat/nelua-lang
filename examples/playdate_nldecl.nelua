@@ -31,11 +31,6 @@ if not fs.isfile('playdate-bindings.nelua') then
     include_dirs = {sdkpath..'/C_API'},
     parse_defines = {'TARGET_EXTENSION 1'},
     include_names = {'^playdate_', '^PD', '^LCD', '^k', '^PlaydateAPI'},
-    gsubs = {
-      -- C function typedefs taken by pointer (e.g. `PDCallbackFunction*`)
-      -- are generated as `*function(...)`, but Nelua function types are already pointers.
-      {'%*function%(', 'function('},
-    },
   }
 end
 
